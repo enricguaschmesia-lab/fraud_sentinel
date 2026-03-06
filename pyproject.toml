@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=80", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fraud-sentinel"
+version = "0.1.0"
+description = "End-to-end fraud detection and analyst triage portfolio project."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+  "Flask>=3.1,<4",
+  "imbalanced-learn>=0.14,<1",
+  "joblib>=1.5,<2",
+  "matplotlib>=3.10,<4",
+  "numpy>=2.3,<3",
+  "pandas>=2.3,<3",
+  "scikit-learn>=1.7,<2",
+  "streamlit>=1.51,<2",
+  "typer>=0.20,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.4,<9",
+]
+
+[project.scripts]
+fraud-sentinel = "fraud_sentinel.cli:app"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
