@@ -16,7 +16,7 @@ This codebase is designed to make the ML reasoning visible:
 - comparison of weighting, oversampling, balanced bagging, and undersampling strategies
 - separation of ranking quality from deployable threshold quality
 - bounded model search with deterministic search spaces and holdout-safe selection logic
-- calibration, drift, error analysis, and explainability artifacts instead of notebook-only screenshots
+- calibration, drift, error analysis, and explainability artifacts
 - packaging of the final champion into reusable inference interfaces
 
 ## Current trained state
