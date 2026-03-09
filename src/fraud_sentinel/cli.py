@@ -6,7 +6,7 @@ from pathlib import Path
 import pandas as pd
 import typer
 
-from fraud_sentinel.config import TrainingConfig
+from fraud_sentinel.config import DiagnosticsConfig, TrainingConfig, TuningConfig
 from fraud_sentinel.inference import load_bundle, score_transactions
 from fraud_sentinel.pipeline import run_training
 
@@ -25,17 +25,41 @@ def train(
         help="Optional row cap for quick experiments.",
     ),
     random_state: int = typer.Option(42, help="Random seed for the model pipelines."),
+    quick: bool = typer.Option(
+        False,
+        help="Use a faster CPU-friendly configuration with reduced estimators and no tuning.",
+    ),
+    skip_tuning: bool = typer.Option(
+        False,
+        help="Disable bounded hyperparameter search for this run.",
+    ),
+    skip_diagnostics: bool = typer.Option(
+        False,
+        help="Disable the extended diagnostics layer for this run.",
+    ),
 ) -> None:
+    tuning_config = TuningConfig(enabled=not (quick or skip_tuning))
+    diagnostics_config = DiagnosticsConfig(
+        enabled=not skip_diagnostics,
+        learning_curve_enabled=not (quick or skip_diagnostics),
+    )
     config = TrainingConfig(
         raw_data_path=raw_data_path,
         sample_rows=sample_rows,
         random_state=random_state,
+        random_forest_estimators=80 if quick else 200,
+        balanced_random_forest_estimators=80 if quick else 200,
+        isolation_forest_estimators=80 if quick else 200,
+        smote_random_forest_estimators=90 if quick else 140,
+        tuning=tuning_config,
+        diagnostics=diagnostics_config,
     )
     metrics = run_training(config)
     champion = metrics["champion"]["test_profiles"]["balanced_f2"]
     typer.echo(
         (
             f"Champion: {metrics['champion']['model_name']} | "
+            f"Strategy={metrics['champion']['imbalance_strategy']} | "
             f"AP={champion['average_precision']:.3f} | "
             f"Precision={champion['precision']:.3f} | "
             f"Recall={champion['recall']:.3f}"
@@ -80,4 +104,3 @@ def summary(
 
 if __name__ == "__main__":
     app()
-

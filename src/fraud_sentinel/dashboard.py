@@ -42,9 +42,9 @@ def main() -> None:
     st.markdown(
         """
         <div class="hero">
-          <div class="hero-kicker">Portfolio ML Project</div>
+          <div class="hero-kicker">Imbalanced ML Benchmark</div>
           <h1>Fraud Sentinel</h1>
-          <p>Explainable fraud detection, analyst triage thresholds, drift checks, and local deployment surfaces.</p>
+          <p>Operational fraud detection with imbalance-strategy benchmarking, threshold-aware triage, and generated diagnostics.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -56,9 +56,9 @@ def main() -> None:
     metric_columns[2].metric("Precision", f"{champion_metrics['precision']:.3f}")
     metric_columns[3].metric("Recall", f"{champion_metrics['recall']:.3f}")
 
-    overview_left, overview_right = st.columns([1.2, 1.0])
+    overview_left, overview_right = st.columns([1.3, 1.0])
     with overview_left:
-        st.subheader("Leaderboard")
+        st.subheader("Supervised Leaderboard")
         leaderboard = pd.DataFrame(metrics["leaderboard"])
         st.dataframe(leaderboard, use_container_width=True, hide_index=True)
 
@@ -67,13 +67,48 @@ def main() -> None:
         threshold_frame = pd.DataFrame(bundle["thresholds"]).T.reset_index(names="profile")
         st.dataframe(threshold_frame, use_container_width=True, hide_index=True)
 
+    resampling_left, resampling_right = st.columns([1.0, 1.0])
+    with resampling_left:
+        st.subheader("Resampling Strategy Comparison")
+        comparison = pd.DataFrame(metrics.get("resampling_strategy_comparison", []))
+        st.dataframe(comparison, use_container_width=True, hide_index=True)
+    with resampling_right:
+        st.subheader("Model Card")
+        model_card = metrics.get("model_card", {})
+        st.json(model_card)
+
+    anomaly_rows = metrics.get("anomaly_leaderboard", [])
+    if anomaly_rows:
+        st.subheader("Anomaly Baselines")
+        st.dataframe(pd.DataFrame(anomaly_rows), use_container_width=True, hide_index=True)
+
     plots_left, plots_right = st.columns(2)
     with plots_left:
         _show_plot("artifacts/figures/precision_recall_curve.png", "Precision-Recall")
         _show_plot("artifacts/figures/feature_importance.png", "Feature Importance")
+        _show_plot("artifacts/figures/calibration_curve.png", "Calibration")
+        _show_plot("artifacts/figures/correlation_summary.png", "Correlation Summary")
     with plots_right:
         _show_plot("artifacts/figures/threshold_tradeoffs.png", "Threshold Trade-offs")
         _show_plot("artifacts/figures/drift_report.png", "Train/Test Drift")
+        _show_plot("artifacts/figures/score_distribution.png", "Score Distribution")
+        _show_plot("artifacts/figures/confusion_matrix_profiles.png", "Threshold Confusion Matrices")
+
+    extra_left, extra_right = st.columns(2)
+    with extra_left:
+        _show_plot("artifacts/figures/feature_distribution_comparison.png", "Feature Distributions")
+    with extra_right:
+        _show_plot("artifacts/figures/learning_curve.png", "Learning Curve")
+
+    diagnostics = metrics.get("diagnostics", {})
+    if diagnostics:
+        st.subheader("Diagnostics Summary")
+        st.json(diagnostics)
+
+    error_preview = pd.DataFrame(metrics.get("error_analysis_preview", []))
+    if not error_preview.empty:
+        st.subheader("Error Analysis Preview")
+        st.dataframe(error_preview, use_container_width=True, hide_index=True)
 
     st.subheader("Batch scoring")
     uploaded_file = st.file_uploader("Upload CSV with raw transaction columns", type=["csv"])
@@ -140,4 +175,3 @@ def _show_plot(path_text: str, title: str) -> None:
 
 if __name__ == "__main__":
     main()
-

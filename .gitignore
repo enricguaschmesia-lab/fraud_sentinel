@@ -22,3 +22,4 @@ artifacts/figures/*
 artifacts/sklearn_data/
 CURRENT_STATE.md
 NEXT_STEPS.md
+credit-fraud-dealing-with-imbalanced-datasets.ipynb

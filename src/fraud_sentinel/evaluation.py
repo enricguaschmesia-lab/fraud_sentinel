@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from typing import Any
 
 import numpy as np
 import pandas as pd
 from sklearn.metrics import (
     average_precision_score,
+    brier_score_loss,
     confusion_matrix,
     precision_recall_fscore_support,
     roc_auc_score,
@@ -26,6 +28,7 @@ class ThresholdResult:
     f2: float
     average_precision: float
     roc_auc: float
+    brier_score: float
     true_positives: int
     false_positives: int
     false_negatives: int
@@ -90,6 +93,26 @@ def evaluate_fixed_thresholds(
     }
 
 
+def ranking_metrics(y_true: np.ndarray, scores: np.ndarray) -> dict[str, float]:
+    clipped_scores = np.clip(scores, 0.0, 1.0)
+    return {
+        "average_precision": float(average_precision_score(y_true, scores)),
+        "roc_auc": float(roc_auc_score(y_true, scores)),
+        "brier_score": float(brier_score_loss(y_true, clipped_scores)),
+    }
+
+
+def train_validation_gap(
+    train_metrics: dict[str, float],
+    validation_metrics: dict[str, float],
+) -> dict[str, float]:
+    return {
+        "average_precision_gap": train_metrics["average_precision"] - validation_metrics["average_precision"],
+        "roc_auc_gap": train_metrics["roc_auc"] - validation_metrics["roc_auc"],
+        "brier_score_gap": train_metrics["brier_score"] - validation_metrics["brier_score"],
+    }
+
+
 def drift_report(train_frame: pd.DataFrame, test_frame: pd.DataFrame) -> pd.DataFrame:
     rows: list[dict[str, float | str]] = []
     for column in train_frame.columns:
@@ -101,16 +124,31 @@ def drift_report(train_frame: pd.DataFrame, test_frame: pd.DataFrame) -> pd.Data
 
 
 def leaderboard_row(
+    *,
     model_name: str,
     description: str,
+    family: str,
+    imbalance_strategy: str,
+    estimator_name: str,
+    is_supervised: bool,
+    train_metrics: dict[str, float],
     validation_profiles: dict[str, ThresholdResult],
+    validation_metrics: dict[str, float],
     test_profiles: dict[str, ThresholdResult],
-) -> dict[str, float | int | str]:
+    tuning_outcome: dict[str, Any],
+) -> dict[str, float | int | str | bool]:
     validation_balanced = validation_profiles["balanced_f2"]
     test_balanced = test_profiles["balanced_f2"]
+    gaps = train_validation_gap(train_metrics, validation_metrics)
     return {
         "model_name": model_name,
         "description": description,
+        "family": family,
+        "imbalance_strategy": imbalance_strategy,
+        "estimator_name": estimator_name,
+        "is_supervised": is_supervised,
+        "train_average_precision": train_metrics["average_precision"],
+        "train_roc_auc": train_metrics["roc_auc"],
         "validation_average_precision": validation_balanced.average_precision,
         "validation_roc_auc": validation_balanced.roc_auc,
         "validation_f2": validation_balanced.f2,
@@ -121,8 +159,76 @@ def leaderboard_row(
         "test_f2": test_balanced.f2,
         "test_recall": test_balanced.recall,
         "test_precision": test_balanced.precision,
+        "strict_queue_precision": test_profiles["strict_queue"].precision,
+        "strict_queue_recall": test_profiles["strict_queue"].recall,
+        "aggressive_queue_precision": test_profiles["aggressive_queue"].precision,
+        "aggressive_queue_recall": test_profiles["aggressive_queue"].recall,
+        "average_precision_gap": gaps["average_precision_gap"],
+        "roc_auc_gap": gaps["roc_auc_gap"],
         "selection_score": validation_balanced.f2,
+        "tuned": tuning_outcome["tuned"],
+        "tuning_best_score": tuning_outcome["best_score"],
     }
+
+
+def class_distribution_summary(splits: dict[str, pd.DataFrame], target_column: str) -> pd.DataFrame:
+    rows: list[dict[str, float | int | str]] = []
+    for split_name, frame in splits.items():
+        fraud_count = int(frame[target_column].sum())
+        rows.append(
+            {
+                "split": split_name,
+                "rows": len(frame),
+                "fraud_cases": fraud_count,
+                "legitimate_cases": int(len(frame) - fraud_count),
+                "fraud_rate": float(frame[target_column].mean()),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def correlation_summary(frame: pd.DataFrame, target_column: str) -> pd.DataFrame:
+    correlations = frame.corr(numeric_only=True)[target_column].drop(target_column)
+    report = pd.DataFrame(
+        {
+            "feature": correlations.index,
+            "correlation": correlations.to_numpy(),
+            "abs_correlation": correlations.abs().to_numpy(),
+        }
+    ).sort_values("abs_correlation", ascending=False, kind="stable")
+    return report.reset_index(drop=True)
+
+
+def build_error_analysis(
+    scored_frame: pd.DataFrame,
+    threshold_results: dict[str, ThresholdResult],
+    max_rows_per_profile: int,
+) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    for profile_name, profile in threshold_results.items():
+        profile_frame = scored_frame.copy()
+        predictions = profile_frame["risk_score"] >= profile.threshold
+        false_positives = profile_frame.loc[(predictions) & (profile_frame["actual_class"] == 0)]
+        false_negatives = profile_frame.loc[(~predictions) & (profile_frame["actual_class"] == 1)]
+
+        for error_type, error_frame, sort_column, ascending in (
+            ("false_positive", false_positives, "risk_score", False),
+            ("false_negative", false_negatives, "Amount", False),
+        ):
+            top_rows = error_frame.sort_values(sort_column, ascending=ascending).head(max_rows_per_profile)
+            for _, row in top_rows.iterrows():
+                rows.append(
+                    {
+                        "threshold_profile": profile_name,
+                        "error_type": error_type,
+                        "Time": row["Time"],
+                        "Amount": row["Amount"],
+                        "risk_score": row["risk_score"],
+                        "actual_class": row["actual_class"],
+                        "reason_codes": row["reason_codes"],
+                    }
+                )
+    return pd.DataFrame(rows)
 
 
 def _build_threshold_grid(scores: np.ndarray, grid_size: int) -> np.ndarray:
@@ -187,6 +293,7 @@ def _evaluate_threshold(
         f2=float(f2),
         average_precision=float(average_precision_score(y_true, scores)),
         roc_auc=float(roc_auc_score(y_true, scores)),
+        brier_score=float(brier_score_loss(y_true, np.clip(scores, 0.0, 1.0))),
         true_positives=int(tp),
         false_positives=int(fp),
         false_negatives=int(fn),
